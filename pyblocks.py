@@ -1,525 +1,740 @@
-#PYBLOCKS Source Code 0.6.1 - TestForPreAlpha Edition
-
-import sys
 import math
-import random
 import time
-from collections import deque
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 import pyglet
+from pyglet.gl import (
+    GL_COLOR_BUFFER_BIT,
+    GL_CULL_FACE,
+    GL_DEPTH_BUFFER_BIT,
+    GL_DEPTH_TEST,
+    GL_LEQUAL,
+    GL_LINES,
+    GL_MODELVIEW,
+    GL_PROJECTION,
+    GL_TRIANGLES,
+    glBegin,
+    glClear,
+    glClearColor,
+    glColor3f,
+    glDepthFunc,
+    glDisable,
+    glEnable,
+    glEnd,
+    glLoadIdentity,
+    glMatrixMode,
+    glOrtho,
+    glRotatef,
+    glTranslatef,
+    glVertex2f,
+    glViewport,
+    gluPerspective,
+)
 from pyglet.window import key, mouse
-from pyglet.gl import *
-from OpenGL.GL import *
-from OpenGL.GLU import *
 
-
-# ================= CONFIGURAÇÕES =================
 TICKS_PER_SEC = 60
-SECTOR_SIZE = 16  # Tamanho do Chunk (16x16)
-WALKING_SPEED = 5
-FLYING_SPEED = 15
-GRAVITY = 20.0
-MAX_JUMP_HEIGHT = 1.0
-JUMP_SPEED = math.sqrt(2 * GRAVITY * MAX_JUMP_HEIGHT)
-PLAYER_HEIGHT = 2
+CHUNK_SIZE = 16
+CHUNK_HEIGHT = 64
+SEA_LEVEL = 16
+RENDER_DISTANCE = 2
+WORLD_SEED = 1337
 
-# IDs dos Blocos
-AIR = 0
-GRASS = 1
-DIRT = 2
-STONE = 3
-WOOD = 4
-LEAVES = 5
-DIAMOND_ORE = 6
-CRAFTING_TABLE = 7
-FURNACE = 8
-PLANKS = 9
+WALK_SPEED = 4.8
+RUN_SPEED = 7.2
+CROUCH_SPEED = 2.6
+FLY_SPEED = 10.0
+GRAVITY = 22.0
+JUMP_SPEED = 8.5
+PLAYER_WIDTH = 0.35
+PLAYER_HEIGHT = 1.8
+CROUCH_HEIGHT = 1.4
 
-# Mapeamento de texturas
-BLOCK_COLORS = {
-    GRASS: (0.5, 0.8, 0.5), # Verde
-    DIRT: (0.55, 0.27, 0.07), # Marrom
-    STONE: (0.5, 0.5, 0.5), # Cinza
-    WOOD: (0.4, 0.2, 0.0), # Madeira escura
-    LEAVES: (0.0, 0.6, 0.0), # Verde escuro
-    DIAMOND_ORE: (0.0, 0.8, 0.8), # Ciano
-    CRAFTING_TABLE: (0.8, 0.6, 0.4),
-    FURNACE: (0.2, 0.2, 0.2),
-    PLANKS: (0.7, 0.5, 0.3)
+BLOCKS = {
+    0: "Air", 1: "Grass", 2: "Dirt", 3: "Stone", 4: "Wood", 5: "Leaves", 6: "Sand", 7: "Water",
+    8: "Iron Ore", 9: "Iron", 10: "Diamond Ore", 11: "Diamond", 12: "Planks", 13: "Crafting Table",
+    14: "Furnace", 15: "Bed", 16: "Raw Meat", 17: "Cooked Meat", 18: "Wool", 19: "Wooden Sword",
+    20: "Stone Sword", 21: "Iron Sword", 22: "Wooden Pickaxe", 23: "Stone Pickaxe", 24: "Iron Pickaxe",
+    25: "Wooden Axe", 26: "Stone Axe", 27: "Iron Axe", 28: "Wooden Shovel", 29: "Stone Shovel", 30: "Iron Shovel"
 }
 
-FACES = [
-    ( 0, 1, 0), ( 0,-1, 0), ( -1, 0, 0), ( 1, 0, 0), ( 0, 0, 1), ( 0, 0, -1),
-]
+AIR, GRASS, DIRT, STONE, WOOD, LEAVES, SAND, WATER = 0, 1, 2, 3, 4, 5, 6, 7
+IRON_ORE, IRON, DIAMOND_ORE, DIAMOND, PLANKS, CRAFTING_TABLE, FURNACE = 8, 9, 10, 11, 12, 13, 14
 
-def cube_vertices(x, y, z, n):
-    """ Retorna vértices do cubo com escala n """
-    return [
-        x-n,y+n,z-n, x-n,y+n,z+n, x+n,y+n,z+n, x+n,y+n,z-n,  # top
-        x-n,y-n,z-n, x+n,y-n,z-n, x+n,y-n,z+n, x-n,y-n,z+n,  # bottom
-        x-n,y-n,z-n, x-n,y-n,z+n, x-n,y+n,z+n, x-n,y+n,z-n,  # left
-        x+n,y-n,z+n, x+n,y-n,z-n, x+n,y+n,z-n, x+n,y+n,z+n,  # right
-        x-n,y-n,z+n, x+n,y-n,z+n, x+n,y+n,z+n, x-n,y+n,z+n,  # front
-        x+n,y-n,z-n, x-n,y-n,z-n, x-n,y+n,z-n, x+n,y+n,z-n,  # back
-    ]
+BLOCK_COLORS = {
+    AIR: (0.0, 0.0, 0.0), GRASS: (0.34, 0.72, 0.28), DIRT: (0.52, 0.36, 0.23), STONE: (0.52, 0.52, 0.56),
+    WOOD: (0.49, 0.31, 0.16), LEAVES: (0.20, 0.55, 0.20), SAND: (0.85, 0.80, 0.56), WATER: (0.16, 0.35, 0.8),
+    IRON_ORE: (0.74, 0.62, 0.50), IRON: (0.84, 0.84, 0.84), DIAMOND_ORE: (0.0, 0.8, 0.8), DIAMOND: (0.35, 1.0, 1.0),
+    PLANKS: (0.67, 0.50, 0.29), CRAFTING_TABLE: (0.64, 0.45, 0.20), FURNACE: (0.25, 0.25, 0.25)
+}
 
-def normalize(position):
-    """ Arredonda posição para coordenadas de bloco """
-    x, y, z = position
-    x, y, z = int(round(x)), int(round(y)), int(round(z))
-    return (x, y, z)
-
-def sectorize(position):
-    """ Retorna a tupla do chunk (x, z) baseado na posição """
-    x, y, z = normalize(position)
-    x, z = x // SECTOR_SIZE, z // SECTOR_SIZE
-    return (x, 0, z)
-
-class Model:
-    def __init__(self, seed_val=None):
-        self.batch = pyglet.graphics.Batch()
-        self.group = pyglet.graphics.Group()
-        self.world = {}  # Mapa: (x,y,z) -> block_type
-        self.shown = {}  # Mapa: (x,y,z) -> vertex_list
-        self._shown = {} # Mapa: (x,y,z) -> vertex_list (chunks)
-        self.sectors = {} # Mapa: (sx, sz) -> lista de coords (x,y,z)
-        self.queue = deque()
-        
-        # Configuração do Mundo
-        self.seed = seed_val if seed_val else random.randint(0, 10000)
-        random.seed(self.seed)
-        
-        self.initialize()
-
-    def initialize(self):
-        # Geração inicial (plataforma + noise simples)
-        n = 80 # Tamanho inicial
-        s = 1  # Step
-        y = 0 
-        
-        # Noise generation simplificado
-        for x in range(-n, n + 1, s):
-            for z in range(-n, n + 1, s):
-                # Simplex noise "fake" usando sin/cos para performance sem lib externa
-                h = int(5 * (math.sin(x/10) + math.cos(z/10))) 
-                
-                # Base
-                self.add_block((x, h - 2, z), STONE, immediate=False)
-                self.add_block((x, h - 1, z), DIRT, immediate=False)
-                self.add_block((x, h, z), GRASS, immediate=False)
-                
-                # Paredes para evitar cair no void no inicio
-                if x in (-n, n) or z in (-n, n):
-                    for dy in range(1, 3):
-                        self.add_block((x, h+dy, z), STONE, immediate=False)
-                
-                # Minérios Raros
-                if random.random() < 0.01:
-                    self.add_block((x, h-3, z), DIAMOND_ORE, immediate=False)
+FACES = [(0, 1, 0), (0, -1, 0), (-1, 0, 0), (1, 0, 0), (0, 0, 1), (0, 0, -1)]
+SHADE = [1.00, 0.58, 0.78, 0.78, 0.90, 0.90]
 
 
-    def exposed(self, position):
-        """ Retorna True se a face do bloco está visível """
-        x, y, z = position
-        for dx, dy, dz in FACES:
-            if (x + dx, y + dy, z + dz) not in self.world:
-                return True
-        return False
+def world_to_chunk(x: int, z: int) -> Tuple[int, int]:
+    return math.floor(x / CHUNK_SIZE), math.floor(z / CHUNK_SIZE)
 
-    def add_block(self, position, block_type, immediate=True):
-        if position in self.world:
-            self.remove_block(position, immediate)
-        self.world[position] = block_type
-        self.sectors.setdefault(sectorize(position), []).append(position)
-        if immediate:
-            if self.exposed(position):
-                self.show_block(position)
-            self.check_neighbors(position)
 
-    def remove_block(self, position, immediate=True):
-        del self.world[position]
-        self.sectors[sectorize(position)].remove(position)
-        if immediate:
-            if position in self.shown:
-                self.hide_block(position)
-            self.check_neighbors(position)
+def local_coord(value: int) -> int:
+    return value % CHUNK_SIZE
 
-    def check_neighbors(self, position):
-        x, y, z = position
-        for dx, dy, dz in FACES:
-            key = (x + dx, y + dy, z + dz)
-            if key not in self.world:
+
+def hash2(x: int, z: int, seed: int) -> float:
+    n = (x * 1836311903) ^ (z * 2971215073) ^ (seed * 4807526976)
+    n = (n << 13) ^ n
+    h = (n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF
+    return 1.0 - h / 1073741824.0
+
+
+def smooth_noise(x: float, z: float, seed: int) -> float:
+    xi = math.floor(x)
+    zi = math.floor(z)
+    xf = x - xi
+    zf = z - zi
+
+    def lerp(a: float, b: float, t: float) -> float:
+        return a + (b - a) * t
+
+    n00 = hash2(xi, zi, seed)
+    n10 = hash2(xi + 1, zi, seed)
+    n01 = hash2(xi, zi + 1, seed)
+    n11 = hash2(xi + 1, zi + 1, seed)
+    u = xf * xf * (3 - 2 * xf)
+    v = zf * zf * (3 - 2 * zf)
+    return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v)
+
+
+def fbm(x: float, z: float, seed: int, octaves: int = 4) -> float:
+    freq = 0.02
+    amp = 1.0
+    value = 0.0
+    norm = 0.0
+    for i in range(octaves):
+        value += smooth_noise(x * freq, z * freq, seed + 101 * i) * amp
+        norm += amp
+        freq *= 2.0
+        amp *= 0.5
+    return value / max(norm, 1e-6)
+
+
+@dataclass
+class Recipe:
+    result: Tuple[int, int]
+    requires: Dict[int, int]
+
+
+RECIPES_2x2 = [Recipe((PLANKS, 4), {WOOD: 1}), Recipe((CRAFTING_TABLE, 1), {PLANKS: 4})]
+RECIPES_3x3 = [Recipe((IRON, 1), {IRON_ORE: 1}), Recipe((DIAMOND, 1), {DIAMOND_ORE: 1}), Recipe((22, 1), {PLANKS: 2, STONE: 1})]
+
+
+class Chunk:
+    def __init__(self, cx: int, cz: int):
+        self.cx = cx
+        self.cz = cz
+        self.blocks: Dict[Tuple[int, int, int], int] = {}
+        self.vertex_list = None
+
+
+class World:
+    def __init__(self, seed: int, batch: pyglet.graphics.Batch):
+        self.seed = seed
+        self.batch = batch
+        self.chunks: Dict[Tuple[int, int], Chunk] = {}
+
+    def get_block(self, pos: Tuple[int, int, int]) -> int:
+        x, y, z = pos
+        if y < 0 or y >= CHUNK_HEIGHT:
+            return AIR
+        ckey = world_to_chunk(x, z)
+        chunk = self.chunks.get(ckey)
+        if not chunk:
+            return AIR
+        return chunk.blocks.get((local_coord(x), y, local_coord(z)), AIR)
+
+    def set_block(self, pos: Tuple[int, int, int], block_id: int):
+        x, y, z = pos
+        if y < 0 or y >= CHUNK_HEIGHT:
+            return
+        ckey = world_to_chunk(x, z)
+        chunk = self.chunks.get(ckey)
+        if not chunk:
+            return
+        lpos = (local_coord(x), y, local_coord(z))
+        if block_id == AIR:
+            chunk.blocks.pop(lpos, None)
+        else:
+            chunk.blocks[lpos] = block_id
+        self.rebuild_chunk_and_neighbors(ckey, x, z)
+
+    def rebuild_chunk_and_neighbors(self, ckey: Tuple[int, int], x: int, z: int):
+        self.rebuild_chunk(ckey)
+        lx = local_coord(x)
+        lz = local_coord(z)
+        if lx == 0:
+            self.rebuild_chunk((ckey[0] - 1, ckey[1]))
+        if lx == CHUNK_SIZE - 1:
+            self.rebuild_chunk((ckey[0] + 1, ckey[1]))
+        if lz == 0:
+            self.rebuild_chunk((ckey[0], ckey[1] - 1))
+        if lz == CHUNK_SIZE - 1:
+            self.rebuild_chunk((ckey[0], ckey[1] + 1))
+
+    def generate_chunk(self, cx: int, cz: int) -> Chunk:
+        chunk = Chunk(cx, cz)
+        wx0 = cx * CHUNK_SIZE
+        wz0 = cz * CHUNK_SIZE
+        for lx in range(CHUNK_SIZE):
+            for lz in range(CHUNK_SIZE):
+                wx = wx0 + lx
+                wz = wz0 + lz
+                n = fbm(wx, wz, self.seed)
+                m = fbm(wx + 1200, wz - 700, self.seed + 17)
+                height = int(SEA_LEVEL + n * 8 + m * 4)
+                height = max(4, min(CHUNK_HEIGHT - 2, height))
+
+                for y in range(height + 1):
+                    block = STONE
+                    if y == height:
+                        block = SAND if height <= SEA_LEVEL else GRASS
+                    elif y >= height - 2:
+                        block = DIRT
+                    if y < height - 5 and hash2(wx + y, wz - y, self.seed) > 0.82:
+                        block = IRON_ORE
+                    if y < height - 12 and hash2(wx - y, wz + y, self.seed + 9) > 0.90:
+                        block = DIAMOND_ORE
+                    chunk.blocks[(lx, y, lz)] = block
+
+                if height <= SEA_LEVEL:
+                    for y in range(height + 1, SEA_LEVEL + 1):
+                        chunk.blocks[(lx, y, lz)] = WATER
+                elif hash2(wx, wz, self.seed + 999) > 0.90:
+                    self._add_tree(chunk, lx, height + 1, lz)
+        return chunk
+
+    def _add_tree(self, chunk: Chunk, lx: int, y: int, lz: int):
+        if y + 5 >= CHUNK_HEIGHT:
+            return
+        for ty in range(y, y + 4):
+            chunk.blocks[(lx, ty, lz)] = WOOD
+        for ox in range(-2, 3):
+            for oz in range(-2, 3):
+                for oy in range(3, 6):
+                    tx = lx + ox
+                    tz = lz + oz
+                    ty = y + oy
+                    if 0 <= tx < CHUNK_SIZE and 0 <= tz < CHUNK_SIZE and ty < CHUNK_HEIGHT and abs(ox) + abs(oz) <= 3:
+                        chunk.blocks[(tx, ty, tz)] = LEAVES
+
+    def load_chunk(self, cx: int, cz: int):
+        key = (cx, cz)
+        if key in self.chunks:
+            return
+        self.chunks[key] = self.generate_chunk(cx, cz)
+        self.rebuild_chunk(key)
+
+    def unload_chunk(self, key: Tuple[int, int]):
+        chunk = self.chunks.pop(key, None)
+        if chunk and chunk.vertex_list is not None:
+            chunk.vertex_list.delete()
+
+    def rebuild_chunk(self, key: Tuple[int, int]):
+        chunk = self.chunks.get(key)
+        if not chunk:
+            return
+        if chunk.vertex_list is not None:
+            chunk.vertex_list.delete()
+            chunk.vertex_list = None
+
+        vertices: List[float] = []
+        colors: List[float] = []
+        indices: List[int] = []
+        offset = 0
+        for (lx, y, lz), block in chunk.blocks.items():
+            if block == AIR:
                 continue
-            if self.exposed(key):
-                if key not in self.shown:
-                    self.show_block(key)
-            else:
-                if key in self.shown:
-                    self.hide_block(key)
+            wx = chunk.cx * CHUNK_SIZE + lx
+            wz = chunk.cz * CHUNK_SIZE + lz
+            base_color = BLOCK_COLORS.get(block, (1.0, 1.0, 1.0))
 
-    def show_block(self, position):
-        block_type = self.world[position]
-        color = BLOCK_COLORS.get(block_type, (1,1,1))
-        
-        # Cores para cada face (simulando luz simples)
-        top = color
-        bottom = [max(0, c - 0.2) for c in color]
-        side = [max(0, c - 0.1) for c in color]
-        
-        vertex_data = cube_vertices(*position, 0.5)
-        
-        # Simples array de cores (R,G,B) * 4 vértices * 6 faces
-        color_data = []
-        color_data.extend(top * 4) # Top
-        color_data.extend(bottom * 4) # Bottom
-        color_data.extend(side * 4 * 4) # Lados
+            for face_idx, (dx, dy, dz) in enumerate(FACES):
+                nb = self.get_block((wx + dx, y + dy, wz + dz))
+                if nb != AIR and not (block == WATER and nb == WATER):
+                    continue
+                face = cube_face_vertices(wx, y, wz, face_idx)
+                shade = SHADE[face_idx]
+                vertices.extend(face)
+                colors.extend([base_color[0] * shade, base_color[1] * shade, base_color[2] * shade] * 4)
+                indices.extend([offset, offset + 1, offset + 2, offset, offset + 2, offset + 3])
+                offset += 4
 
-        # Adiciona ao Batch do Pyglet
-        self.shown[position] = self.batch.add(24, GL_QUADS, self.group,
-            ('v3f/static', vertex_data),
-            ('c3f/static', color_data))
+        if indices:
+            chunk.vertex_list = self.batch.add_indexed(offset, GL_TRIANGLES, None, indices, ("v3f/static", vertices), ("c3f/static", colors))
 
-    def hide_block(self, position):
-        self.shown.pop(position).delete()
 
-    def hit_test(self, position, vector, max_distance=8):
-        m = 8
-        x, y, z = position
-        dx, dy, dz = vector
-        previous = None
-        for _ in range(max_distance * m):
-            key = normalize((x, y, z))
-            if key != previous and key in self.world:
-                return key, previous
-            previous = key
-            x, y, z = x + dx / m, y + dy / m, z + dz / m
-        return None, None
+def cube_face_vertices(x: int, y: int, z: int, face_idx: int) -> List[float]:
+    x0, x1 = x, x + 1
+    y0, y1 = y, y + 1
+    z0, z1 = z, z + 1
+    if face_idx == 0:
+        return [x0, y1, z0, x0, y1, z1, x1, y1, z1, x1, y1, z0]
+    if face_idx == 1:
+        return [x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1]
+    if face_idx == 2:
+        return [x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0]
+    if face_idx == 3:
+        return [x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1]
+    if face_idx == 4:
+        return [x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1]
+    return [x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0]
 
-class Window(pyglet.window.Window):
-    def init_gl(self):
-        glClearColor(0.5, 0.69, 1.0, 1)
-        glEnable(GL_CULL_FACE)
-    def __init__(self, *args, **kwargs):
-        super(Window, self).__init__(*args, **kwargs)
+
+class GameWindow(pyglet.window.Window):
+    def __init__(self):
+        config = pyglet.gl.Config(major_version=2, minor_version=1, depth_size=24, double_buffer=True)
+        super().__init__(1280, 720, "PyBlocks - Voxel", resizable=True, config=config)
+        self.set_minimum_size(960, 540)
+
+        self.batch = pyglet.graphics.Batch()
+        self.world = World(WORLD_SEED, self.batch)
+
+        self.pos = [0.0, 26.0, 0.0]
+        self.rot = [0.0, 0.0]
+        self.vel_y = 0.0
+        self.grounded = False
         self.exclusive = False
         self.flying = False
-        self.strafe = [0, 0]
-        self.position = (0, 10, 0)
-        self.rotation = (0, 0)
-        self.sector = None
-        self.reticle = None
-        self.dy = 0
-        self.inventory = {WOOD: 0, STONE: 0, DIRT: 0, DIAMOND_ORE: 0, PLANKS: 0}
-        self.block_cursor = STONE
-        self.mode = 'creative' # creative, exploration
+        self.game_mode = "exploration"
         self.health = 20
         self.credits_shown = False
-        
-        # Mobs simples (apenas posições)
-        self.mobs = [{'pos': [5, 5, 5], 'type': 'cow'}]
-        
-        self.model = Model()
-        
-        # Label setup
-        self.label = pyglet.text.Label('', font_name='Arial', font_size=10, 
-            x=10, y=self.height - 10, anchor_x='left', anchor_y='top', color=(0,0,0,255))
-        
-        self.credits_label = pyglet.text.Label('', font_name='Arial', font_size=16,
-            x=self.width//2, y=self.height//2, anchor_x='center', anchor_y='center', 
-            multiline=True, width=400, color=(255, 255, 255, 255))
+        self.render_distance = RENDER_DISTANCE
+
+        self.move = {"w": False, "a": False, "s": False, "d": False, "run": False, "crouch": False}
+        self.crouching = False
+        self.hotbar = [GRASS, DIRT, STONE, WOOD, PLANKS, CRAFTING_TABLE, FURNACE, SAND, LEAVES]
+        self.selected = 0
+        self.inventory: Dict[int, int] = {bid: 0 for bid in BLOCKS.keys() if bid != AIR}
+        self.inventory[GRASS] = 32
+        self.inventory[DIRT] = 32
+        self.inventory[STONE] = 32
+        self.inventory[WOOD] = 16
+        self.inventory[CRAFTING_TABLE] = 1
+
+        self.ui_mode: Optional[str] = None
+        self.grid2: List[int] = [AIR] * 4
+        self.grid3: List[int] = [AIR] * 9
+        self.grid_cursor = 0
+        self.grid_pick = WOOD
+
+        self.mobs = [{"pos": [5.0, 25.0, 5.0], "type": "cow"}]
+
+        self.debug = pyglet.text.Label("", x=12, y=self.height - 12, anchor_x="left", anchor_y="top", color=(255, 255, 255, 255))
+        self.ui_label = pyglet.text.Label("", x=12, y=140, anchor_x="left", anchor_y="bottom", color=(255, 255, 255, 255), multiline=True, width=660)
+        self.credits_label = pyglet.text.Label(
+            "",
+            x=self.width // 2,
+            y=self.height // 2,
+            anchor_x="center",
+            anchor_y="center",
+            multiline=True,
+            width=540,
+            color=(255, 255, 255, 255),
+        )
 
         pyglet.clock.schedule_interval(self.update, 1.0 / TICKS_PER_SEC)
-        pyglet.clock.schedule_interval(self.update_mobs, 1.0) # Mobs lentos
+        pyglet.clock.schedule_interval(self.update_mobs, 1.0)
 
-    def set_exclusive_mouse(self, exclusive):
-        super(Window, self).set_exclusive_mouse(exclusive)
-        self.exclusive = exclusive
+        self.last_chunk = None
+        self.update_visible_chunks(force=True)
 
-    def get_sight_vector(self):
-        x, y = self.rotation
-        m = math.cos(math.radians(y))
-        dy = math.sin(math.radians(y))
-        dx = math.cos(math.radians(x - 90)) * m
-        dz = math.sin(math.radians(x - 90)) * m
-        return (dx, dy, dz)
+        glClearColor(0.53, 0.74, 0.95, 1.0)
+        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_CULL_FACE)
+        glDepthFunc(GL_LEQUAL)
 
-    def get_motion_vector(self):
-        if any(self.strafe):
-            x, y = self.rotation
-            strafe = math.degrees(math.atan2(*self.strafe))
-            y_angle = math.radians(y)
-            x_angle = math.radians(x + strafe)
-            if self.flying:
-                m = math.cos(y_angle)
-                dy = math.sin(y_angle)
-                if self.strafe[1]:
-                    dy = 0.0
-                    m = 1
-                if self.strafe[0] > 0:
-                    dy *= -1
-                dx = math.cos(x_angle) * m
-                dz = math.sin(x_angle) * m
-            else:
-                dy = 0.0
-                dx = math.cos(x_angle)
-                dz = math.sin(x_angle)
-            return (dx, dy, dz)
-        return (0.0, 0.0, 0.0)
+    def get_sight_vector(self) -> Tuple[float, float, float]:
+        rx, ry = self.rot
+        m = math.cos(math.radians(ry))
+        return (
+            math.cos(math.radians(rx - 90.0)) * m,
+            math.sin(math.radians(ry)),
+            math.sin(math.radians(rx - 90.0)) * m,
+        )
 
-    def update(self, dt):
-        if self.credits_shown: return
+    def get_motion_vector(self) -> Tuple[float, float, float]:
+        fw = float(self.move["w"]) - float(self.move["s"])
+        sd = float(self.move["d"]) - float(self.move["a"])
+        if fw == 0 and sd == 0:
+            return 0.0, 0.0, 0.0
+        yaw = math.radians(self.rot[0])
+        fx, fz = math.cos(yaw), math.sin(yaw)
+        rx, rz = math.cos(yaw + math.pi / 2), math.sin(yaw + math.pi / 2)
+        dx = fx * fw + rx * sd
+        dz = fz * fw + rz * sd
+        l = math.sqrt(dx * dx + dz * dz)
+        return dx / l, 0.0, dz / l
 
-        self.model.queue = deque() # Limpa queue antiga
-        sector = sectorize(self.position)
-        if sector != self.sector:
-            self.model.batch = pyglet.graphics.Batch() # Refresh batch no chunk change (simples)
-            self.model.initialize() # Re-renderiza área próxima
-            self.sector = sector
+    def update_visible_chunks(self, force: bool = False):
+        pchunk = world_to_chunk(int(math.floor(self.pos[0])), int(math.floor(self.pos[2])))
+        if not force and pchunk == self.last_chunk:
+            return
+        self.last_chunk = pchunk
 
-        m = 8
-        dt = min(dt, 0.2)
-        for _ in range(m):
-            self._update(dt / m)
+        needed = set()
+        for dx in range(-self.render_distance, self.render_distance + 1):
+            for dz in range(-self.render_distance, self.render_distance + 1):
+                if dx * dx + dz * dz <= self.render_distance * self.render_distance:
+                    needed.add((pchunk[0] + dx, pchunk[1] + dz))
 
-    def _update(self, dt):
-        # Walk logic
-        speed = FLYING_SPEED if self.flying else WALKING_SPEED
-        d = dt * speed
-        dx, dy, dz = self.get_motion_vector()
-        dx, dy, dz = dx * d, dy * d, dz * d
-        
-        # Gravity
-        if not self.flying:
-            self.dy -= dt * GRAVITY
-            self.dy = max(self.dy, -50) # Terminal velocity
-            dy += self.dy * dt
+        loaded = set(self.world.chunks.keys())
+        for c in sorted(needed - loaded):
+            self.world.load_chunk(*c)
+        for c in loaded - needed:
+            self.world.unload_chunk(c)
 
-        x, y, z = self.position
-        x, y, z = self.collide((x + dx, y + dy, z + dz), PLAYER_HEIGHT)
-        self.position = (x, y, z)
-
-        # Fall damage logic (Simplificado: se dy parou abruptamente e estava rápido)
-        if not self.flying and self.mode == 'exploration':
-            if y < -100: # Void
-                self.respawn()
-
-    def collide(self, position, height):
-        pad = 0.25
-        p = list(position)
-        np = normalize(position)
-        for face in FACES:  # check all surrounding blocks
-            for i in range(3):  # check each dimension independently
-                if not face[i]:
-                    continue
-                d = (p[i] - np[i]) * face[i]
-                if d < pad:
-                    continue
-                for dy in range(height):  # check each height
-                    op = list(np)
-                    op[1] -= dy
-                    op[i] += face[i]
-                    if tuple(op) not in self.model.world:
-                        continue
-                    p[i] -= (d - pad) * face[i]
-                    if face[1]:
-                        self.dy = 0
-                    break
-        return tuple(p)
-
-    def update_mobs(self, dt):
-        # AI BÁSICA: Mobs andam aleatoriamente
-        for mob in self.mobs:
-            dx = random.choice([-1, 0, 1])
-            dz = random.choice([-1, 0, 1])
-            bx, by, bz = mob['pos']
-            if (bx+dx, by, bz+dz) not in self.model.world: # Só anda se não tiver parede
-                mob['pos'][0] += dx * 0.2
-                mob['pos'][2] += dz * 0.2
+    def hit_test(self, max_distance=8.0):
+        ox, oy, oz = self.pos
+        dx, dy, dz = self.get_sight_vector()
+        px = py = pz = None
+        t = 0.0
+        while t <= max_distance:
+            x = int(math.floor(ox + dx * t))
+            y = int(math.floor(oy + dy * t))
+            z = int(math.floor(oz + dz * t))
+            if (x, y, z) != (px, py, pz):
+                block = self.world.get_block((x, y, z))
+                if block != AIR and block != WATER:
+                    return (x, y, z), (px, py, pz)
+                px, py, pz = x, y, z
+            t += 0.1
+        return None, None
 
     def on_mouse_press(self, x, y, button, modifiers):
-        if self.exclusive:
-            vector = self.get_sight_vector()
-            block, previous = self.model.hit_test(self.position, vector)
-            if (button == mouse.RIGHT) or \
-                ((button == mouse.LEFT) and (modifiers & key.MOD_CTRL)):
-                if previous:
-                    self.model.add_block(previous, self.block_cursor)
-                    # Gasta item se exploração
-            elif button == mouse.LEFT and block:
-                texture = self.model.world[block]
-                if texture != AIR:
-                    self.model.remove_block(block)
-                    # Drop Logic
-                    if self.mode == 'exploration':
-                        if texture == DIAMOND_ORE:
-                            self.trigger_win()
-                        else:
-                            self.inventory[texture] = self.inventory.get(texture, 0) + 1
-        else:
+        if self.credits_shown or self.ui_mode:
+            return
+        if not self.exclusive:
             self.set_exclusive_mouse(True)
+            self.exclusive = True
+            return
+
+        target, neighbor = self.hit_test()
+        if button == mouse.LEFT and target:
+            bid = self.world.get_block(target)
+            self.world.set_block(target, AIR)
+            if bid != AIR:
+                self.inventory[bid] = self.inventory.get(bid, 0) + 1
+            if bid == DIAMOND_ORE:
+                self.trigger_win()
+        if button == mouse.RIGHT and neighbor:
+            block = self.hotbar[self.selected]
+            if self.game_mode == "creative" or self.inventory.get(block, 0) > 0:
+                self.world.set_block(neighbor, block)
+                if self.game_mode != "creative":
+                    self.inventory[block] -= 1
 
     def on_mouse_motion(self, x, y, dx, dy):
-        if self.exclusive:
-            m = 0.15
-            x, y = self.rotation
-            x, y = x + dx * m, y + dy * m
-            y = max(-90, min(90, y))
-            self.rotation = (x, y)
+        if not self.exclusive or self.ui_mode or self.credits_shown:
+            return
+        self.rot[0] = (self.rot[0] + dx * 0.15) % 360
+        self.rot[1] = max(-89.9, min(89.9, self.rot[1] + dy * 0.15))
 
     def on_key_press(self, symbol, modifiers):
-        if symbol == key.W: self.strafe[0] -= 1
-        elif symbol == key.S: self.strafe[0] += 1
-        elif symbol == key.A: self.strafe[1] -= 1
-        elif symbol == key.D: self.strafe[1] += 1
-        elif symbol == key.SPACE:
-            if self.dy == 0: self.dy = JUMP_SPEED
-        elif symbol == key.ESCAPE:
+        if symbol == key.ESCAPE:
             self.set_exclusive_mouse(False)
+            self.exclusive = False
+            self.ui_mode = None
+            self.credits_shown = False
+        elif symbol == key.W:
+            self.move["w"] = True
+        elif symbol == key.A:
+            self.move["a"] = True
+        elif symbol == key.S:
+            self.move["s"] = True
+        elif symbol == key.D:
+            self.move["d"] = True
+        elif symbol == key.LSHIFT:
+            self.move["run"] = True
+        elif symbol == key.LCTRL:
+            self.move["crouch"] = True
         elif symbol == key.TAB:
             self.flying = not self.flying
-        elif symbol == key._1: self.block_cursor = STONE
-        elif symbol == key._2: self.block_cursor = DIRT
-        elif symbol == key._3: self.block_cursor = GRASS
-        elif symbol == key._4: self.block_cursor = WOOD
-        elif symbol == key._5: self.block_cursor = PLANKS
-        elif symbol == key._6: self.block_cursor = CRAFTING_TABLE
-        elif symbol == key._7: self.block_cursor = FURNACE
-        
-        # Comandos Simples (Teclas de atalho para demonstração)
-        elif symbol == key.C: # Crafting simples (Madeira -> Planks)
-            if self.inventory.get(WOOD, 0) >= 1:
-                self.inventory[WOOD] -= 1
-                self.inventory[PLANKS] = self.inventory.get(PLANKS, 0) + 4
-                print("Craftado: 4 Planks")
-        
-        elif symbol == key.G: # Toggle Game Mode
-            self.mode = 'creative' if self.mode == 'exploration' else 'exploration'
-            self.flying = True if self.mode == 'creative' else False
-            print(f"Gamemode: {self.mode}")
+        elif symbol == key.G:
+            self.game_mode = "creative" if self.game_mode == "exploration" else "exploration"
+            self.flying = self.game_mode == "creative"
+        elif symbol == key.SPACE and not self.ui_mode:
+            if self.flying:
+                self.pos[1] += 1.0
+            elif self.grounded:
+                self.vel_y = JUMP_SPEED
+                self.grounded = False
+        elif symbol == key.I:
+            self.ui_mode = None if self.ui_mode == "inv" else "inv"
+            self.set_exclusive_mouse(False)
+            self.exclusive = False
+        elif symbol == key.E:
+            self.ui_mode = None if self.ui_mode == "table" else "table"
+            self.set_exclusive_mouse(False)
+            self.exclusive = False
+        elif symbol == key.LEFT and self.ui_mode:
+            self.grid_cursor = (self.grid_cursor - 1) % (4 if self.ui_mode == "inv" else 9)
+        elif symbol == key.RIGHT and self.ui_mode:
+            self.grid_cursor = (self.grid_cursor + 1) % (4 if self.ui_mode == "inv" else 9)
+        elif symbol == key.UP and self.ui_mode:
+            self.grid_pick = max(1, self.grid_pick - 1)
+        elif symbol == key.DOWN and self.ui_mode:
+            self.grid_pick = min(30, self.grid_pick + 1)
+        elif symbol == key.ENTER and self.ui_mode:
+            self.apply_craft()
+        elif symbol == key.BACKSPACE and self.ui_mode:
+            (self.grid2 if self.ui_mode == "inv" else self.grid3)[self.grid_cursor] = AIR
+        elif symbol == key.P and self.ui_mode and self.inventory.get(self.grid_pick, 0) > 0:
+            (self.grid2 if self.ui_mode == "inv" else self.grid3)[self.grid_cursor] = self.grid_pick
+        elif key._1 <= symbol <= key._9:
+            self.selected = symbol - key._1
 
     def on_key_release(self, symbol, modifiers):
-        if symbol == key.W: self.strafe[0] += 1
-        elif symbol == key.S: self.strafe[0] -= 1
-        elif symbol == key.A: self.strafe[1] += 1
-        elif symbol == key.D: self.strafe[1] -= 1
+        if symbol == key.W:
+            self.move["w"] = False
+        elif symbol == key.A:
+            self.move["a"] = False
+        elif symbol == key.S:
+            self.move["s"] = False
+        elif symbol == key.D:
+            self.move["d"] = False
+        elif symbol == key.LSHIFT:
+            self.move["run"] = False
+        elif symbol == key.LCTRL:
+            self.move["crouch"] = False
 
-    def on_resize(self, width, height):
-        self.label.y = height - 10
-        
-        x, y = width // 2, height // 2
-        n = 10
-        # CORREÇÃO v0.3: Removido o argumento 'width' do construtor
-        self.reticle = [
-            pyglet.shapes.Line(x - n, y, x + n, y, color=(0, 0, 0, 255)),
-            pyglet.shapes.Line(x, y - n, x, y + n, color=(0, 0, 0, 255))
-        ]
-        # Ajusta a largura manualmente após criar (funciona na maioria das versões)
-        self.reticle[0].width = 2
-        self.reticle[1].width = 2
-        
-    def set_2d(self):
-        width, height = self.get_size()
-        glDisable(GL_DEPTH_TEST)
-        glViewport(0, 0, width, height)
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        glOrtho(0, width, 0, height, -1, 1)
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
+    def apply_craft(self):
+        grid = self.grid2 if self.ui_mode == "inv" else self.grid3
+        recipes = RECIPES_2x2 if self.ui_mode == "inv" else RECIPES_3x3
+        contents: Dict[int, int] = {}
+        for b in grid:
+            if b != AIR:
+                contents[b] = contents.get(b, 0) + 1
+
+        for recipe in recipes:
+            ok = True
+            for bid, qty in recipe.requires.items():
+                if contents.get(bid, 0) < qty or self.inventory.get(bid, 0) < qty:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for bid, qty in recipe.requires.items():
+                self.inventory[bid] -= qty
+            out, qty = recipe.result
+            self.inventory[out] = self.inventory.get(out, 0) + qty
+            for i in range(len(grid)):
+                grid[i] = AIR
+            return
+
+    def update_mobs(self, dt: float):
+        if self.credits_shown:
+            return
+        now = int(time.time())
+        for mob in self.mobs:
+            dx = 1 if hash2(int(mob["pos"][0] * 10), now, WORLD_SEED) > 0.6 else -1
+            dz = 1 if hash2(int(mob["pos"][2] * 10), now + 33, WORLD_SEED) > 0.6 else -1
+            nx = mob["pos"][0] + dx * 0.2
+            nz = mob["pos"][2] + dz * 0.2
+            by = int(math.floor(mob["pos"][1]))
+            if self.world.get_block((int(nx), by, int(nz))) == AIR:
+                mob["pos"][0] = nx
+                mob["pos"][2] = nz
+
+    def collide(self, next_pos: List[float], h: float) -> List[float]:
+        px, py, pz = next_pos
+
+        def solid(x: int, y: int, z: int) -> bool:
+            b = self.world.get_block((x, y, z))
+            return b != AIR and b != WATER
+
+        for axis in range(3):
+            minx, maxx = px - PLAYER_WIDTH, px + PLAYER_WIDTH
+            minz, maxz = pz - PLAYER_WIDTH, pz + PLAYER_WIDTH
+            miny, maxy = py, py + h
+
+            collided = False
+            for bx in range(math.floor(minx), math.floor(maxx) + 1):
+                for by in range(math.floor(miny), math.floor(maxy) + 1):
+                    for bz in range(math.floor(minz), math.floor(maxz) + 1):
+                        if solid(bx, by, bz):
+                            collided = True
+                            break
+                    if collided:
+                        break
+                if collided:
+                    break
+
+            if not collided:
+                continue
+            if axis == 1:
+                if self.vel_y < 0:
+                    py = math.floor(py) + 0.001
+                    self.grounded = True
+                else:
+                    py = math.ceil(py) - h - 0.001
+                self.vel_y = 0.0
+            elif axis == 0:
+                px = self.pos[0]
+            else:
+                pz = self.pos[2]
+
+        return [px, py, pz]
+
+    def update(self, dt: float):
+        if self.credits_shown:
+            return
+        dt = min(0.04, dt)
+        self.crouching = self.move["crouch"]
+        speed = RUN_SPEED if self.move["run"] else WALK_SPEED
+        if self.crouching:
+            speed = CROUCH_SPEED
+
+        mx, _, mz = self.get_motion_vector()
+        nx = self.pos[0] + mx * speed * dt
+        nz = self.pos[2] + mz * speed * dt
+
+        if self.flying:
+            up = 1.0 if self.move["run"] else 0.0
+            down = 1.0 if self.move["crouch"] else 0.0
+            ny = self.pos[1] + (up - down) * FLY_SPEED * dt
+            self.vel_y = 0.0
+            self.pos = [nx, ny, nz]
+        else:
+            self.vel_y -= GRAVITY * dt
+            ny = self.pos[1] + self.vel_y * dt
+            self.grounded = False
+            self.pos = self.collide([nx, ny, nz], CROUCH_HEIGHT if self.crouching else PLAYER_HEIGHT)
+
+        if self.pos[1] < -20:
+            self.pos = [0.0, 30.0, 0.0]
+            self.vel_y = 0.0
+
+        self.update_visible_chunks()
+
+    def draw_crosshair(self):
+        w, h = self.get_size()
+        cx, cy = w // 2, h // 2
+        glColor3f(0.0, 0.0, 0.0)
+        glBegin(GL_LINES)
+        glVertex2f(cx - 8, cy)
+        glVertex2f(cx + 8, cy)
+        glVertex2f(cx, cy - 8)
+        glVertex2f(cx, cy + 8)
+        glEnd()
 
     def set_3d(self):
-        # Garantir que a altura não seja zero pra evitar divisão por zero
-        width, height = self.get_size()
-        if height == 0:
-            height = 1
-
-        # --- CORREÇÃO CRÍTICA v0.4: Desativa shaders do Pyglet para permitir OpenGL Legacy ---
-        try:
-            glUseProgram(0)
-        except:
-            pass
-        # --------------------------------------------------------------------------------
-
-        # Ativa profundidade
+        w, h = self.get_size()
         glEnable(GL_DEPTH_TEST)
-        glViewport(0, 0, width, height)
-
-        # Configuração da projeção
+        glViewport(0, 0, w, max(1, h))
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        gluPerspective(65.0, width / float(height), 0.1, 60.0)
+        gluPerspective(70.0, w / max(1.0, float(h)), 0.1, 300.0)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        glRotatef(self.rot[1], math.cos(math.radians(self.rot[0])), 0, math.sin(math.radians(self.rot[0])))
+        glRotatef(self.rot[0], 0, -1, 0)
+        eye = CROUCH_HEIGHT - 0.2 if self.crouching else PLAYER_HEIGHT - 0.2
+        glTranslatef(-self.pos[0], -(self.pos[1] + eye), -self.pos[2])
 
-        # Configuração da modelview
+    def set_2d(self):
+        w, h = self.get_size()
+        glDisable(GL_DEPTH_TEST)
+        glViewport(0, 0, w, h)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(0, w, 0, h, -1, 1)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
 
-        # Rotação da câmera
-        x_rot, y_rot = self.rotation
-        glRotatef(x_rot, 0, 1, 0)
-        glRotatef(-y_rot, math.cos(math.radians(x_rot)), 0, math.sin(math.radians(x_rot)))
-
-        # Translação da câmera
-        x_pos, y_pos, z_pos = self.position
-        glTranslatef(-x_pos, -y_pos, -z_pos)
-
     def on_draw(self):
-        if not hasattr(self, '_gl_initialized'):
-            self.init_gl()
-            self._gl_initialized = True
-
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)  # limpa cor + profundidade
-
-        # --- Desenho 3D ---
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.set_3d()
-        glColor3f(1, 1, 1)
-        self.model.batch.draw()
-    
+        self.batch.draw()
         for mob in self.mobs:
-            glPushMatrix()
-            glTranslatef(mob['pos'][0], mob['pos'][1], mob['pos'][2])
-            glBegin(GL_QUADS)
-            glColor3f(1, 0.8, 0.6)
-            
-            # --- CORREÇÃO v0.6: Iterar a lista plana de vértices de 3 em 3 ---
-            verts = cube_vertices(0, 0, 0, 0.4)
-            for i in range(0, len(verts), 3):
-                glVertex3f(verts[i], verts[i+1], verts[i+2])
-            # -----------------------------------------------------------
-            
-            glEnd()
-            glPopMatrix()
+            draw_mob(mob["pos"])
 
-        # --- Interface 2D ---
         self.set_2d()
-        if self.reticle:
-            for line in self.reticle:
-                line.draw()
-        info = f"FPS: {pyglet.clock.get_frequency():.1f} | Pos: {tuple(map(int, self.position))} | Mode: {self.mode}"
-        self.label.text = info
-        self.label.draw()
-    
-        inv_text = f"Bloco: {self.block_cursor} | Madeira: {self.inventory.get(WOOD,0)} | Pedras: {self.inventory.get(STONE,0)}"
-        pyglet.text.Label(inv_text, x=10, y=20, color=(255,255,255,255)).draw()
+        self.draw_crosshair()
+
+        chunk = world_to_chunk(int(math.floor(self.pos[0])), int(math.floor(self.pos[2])))
+        self.debug.y = self.height - 12
+        self.debug.text = (
+            f"FPS: {pyglet.clock.get_fps():.1f} | Pos: ({self.pos[0]:.1f}, {self.pos[1]:.1f}, {self.pos[2]:.1f}) "
+            f"| Chunk: {chunk} | Loaded chunks: {len(self.world.chunks)} | Render distance: {self.render_distance}"
+        )
+        self.debug.draw()
+
+        sel = self.hotbar[self.selected]
+        inv_count = self.inventory.get(sel, 0)
+        pyglet.text.Label(
+            f"Modo: {self.game_mode} | Vida: {self.health} | Fly[TAB]: {self.flying} | Bloco {BLOCKS[sel]} x{inv_count}",
+            x=12, y=12, anchor_x="left", anchor_y="bottom", color=(255, 255, 255, 255)
+        ).draw()
+        pyglet.text.Label(
+            "I: Craft 2x2 | E: Craft 3x3 | ENTER: craft | G: trocar modo", x=12, y=32,
+            anchor_x="left", anchor_y="bottom", color=(255, 255, 255, 255)
+        ).draw()
+
+        if self.ui_mode:
+            grid = self.grid2 if self.ui_mode == "inv" else self.grid3
+            side = 2 if self.ui_mode == "inv" else 3
+            lines = [f"{self.ui_mode.upper()} CRAFTING ({side}x{side})"]
+            for r in range(side):
+                row = []
+                for c in range(side):
+                    idx = r * side + c
+                    marker = "*" if idx == self.grid_cursor else " "
+                    row.append(f"{marker}[{idx + 1}:{BLOCKS.get(grid[idx], 'Air')}]")
+                lines.append(" ".join(row))
+            lines.append(f"Pick atual: {self.grid_pick} {BLOCKS[self.grid_pick]} (UP/DOWN)")
+            lines.append("P: colocar item | BACKSPACE: limpar | ENTER: craft")
+            self.ui_label.text = "\n".join(lines)
+            self.ui_label.draw()
 
         if self.credits_shown:
+            self.credits_label.x = self.width // 2
+            self.credits_label.y = self.height // 2
             self.credits_label.draw()
-
-
-            
-    def respawn(self):
-        self.position = (0, 10, 0)
-        self.dy = 0
 
     def trigger_win(self):
         self.credits_shown = True
-        self.credits_label.text = ("PARABÉNS! VOCÊ ENCONTROU UM DIAMANTE!\n\n"
-                                   "Criador: Matttz\nAno: 2026\n"
-                                   "Tecnologias: Python, Pyglet, OpenGL Legacy Wrapper\n\n"
-                                   "Pressione ESC para sair.")
+        self.credits_label.text = (
+            "PARABÉNS! VOCÊ ENCONTROU UM DIAMANTE!\n\n"
+            "Criador: Matttz\nAno: 2026\n"
+            "Tecnologias: Python, Pyglet, OpenGL\n\n"
+            "Pressione ESC para continuar."
+        )
 
 
-if __name__ == '__main__':
-    # Correção de Compatibilidade v0.5: Configura o OpenGL para a versão 2.1 (Legacy) para permitir glMatrixMode/glBegin
-    config = pyglet.gl.Config(major_version=2, minor_version=1, double_buffer=True, depth_size=24)
-    window = Window(width=800, height=600, caption='PyBlocks', resizable=True, config=config)
+def draw_mob(pos: List[float]):
+    x, y, z = pos
+    n = 0.35
+    verts = [
+        (x - n, y + n, z - n), (x - n, y + n, z + n), (x + n, y + n, z + n), (x + n, y + n, z - n),
+        (x - n, y - n, z - n), (x + n, y - n, z - n), (x + n, y - n, z + n), (x - n, y - n, z + n),
+    ]
+    tris = [
+        (0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6),
+        (4, 1, 0), (4, 5, 1), (5, 2, 1), (5, 6, 2),
+        (6, 7, 3), (6, 3, 2), (7, 4, 0), (7, 0, 3),
+    ]
+    glColor3f(1.0, 0.82, 0.67)
+    glBegin(GL_TRIANGLES)
+    for a, b, c in tris:
+        pyglet.gl.glVertex3f(*verts[a])
+        pyglet.gl.glVertex3f(*verts[b])
+        pyglet.gl.glVertex3f(*verts[c])
+    glEnd()
+
+
+def main():
+    GameWindow()
     pyglet.app.run()
+
+
+if __name__ == "__main__":
+    main()
